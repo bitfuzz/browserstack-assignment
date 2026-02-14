@@ -5,50 +5,20 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import requests
 import os
+import json
 from dotenv import load_dotenv
 import re
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 
 api_key = os.environ.get("RAPID_API_KEY")
-bs_user = os.environ.get("BROWSERSTACK_USERNAME")
-bs_key = os.environ.get("BROWSERSTACK_ACCESS_KEY")
 
-# 1. Define the 5 parallel environments (Desktop & Mobile)
-environments = [
-    {"browserName": "Chrome", "browserVersion": "latest", "os": "Windows", "osVersion": "11"},
-    {"browserName": "Safari", "browserVersion": "latest", "os": "OS X", "osVersion": "Ventura"},
-    {"browserName": "Firefox", "browserVersion": "latest", "os": "Windows", "osVersion": "10"},
-    {"browserName": "chrome", "deviceName": "Samsung Galaxy S23", "osVersion": "13.0"},
-    {"browserName": "safari", "deviceName": "iPhone 14 Pro", "osVersion": "16"}
-]
-
-# 2. Refactored to connect to BrowserStack Hub
-def setup_driver(env_cap):
-    bstack_options = {
-        "os": env_cap.get("os", ""),
-        "osVersion": env_cap.get("osVersion", ""),
-        "deviceName": env_cap.get("deviceName", ""),
-        "realMobile": "true" if "deviceName" in env_cap else "false",
-        "sessionName": f"El Pais Script - {env_cap.get('browserName')} {env_cap.get('os', env_cap.get('deviceName'))}",
-        "userName": bs_user,
-        "accessKey": bs_key
-    }
-    
-    browser_name = env_cap.get("browserName", "chrome").lower()
-    if browser_name == "safari":
-        options = webdriver.safari.options.Options()
-    elif browser_name == "firefox":
-        options = webdriver.firefox.options.Options()
-    else:
-        options = webdriver.ChromeOptions()
-        
-    options.set_capability('bstack:options', bstack_options)
-    
-    hub_url = "https://hub-cloud.browserstack.com/wd/hub"
-    return webdriver.Remote(command_executor=hub_url, options=options)
+def setup_driver():
+    # Keep it local; the BrowserStack SDK intercepts this automatically
+    options = webdriver.ChromeOptions()
+    driver = webdriver.Chrome(options=options)
+    return driver
 
 def scrape_elpais_opinion(driver):
     url = "https://elpais.com/opinion/"
@@ -109,7 +79,7 @@ def translate_espanyol_to_eng(title, content):
         "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
-    return response.json()['trans']
+    return response.json().get('trans', {})
 
 def save_image(link):
     if not link:
@@ -117,9 +87,9 @@ def save_image(link):
 
     directory = os.path.join(os.getcwd(), 'cover_image')
     try:
-        os.makedirs('cover_image', exist_ok=True)
+        os.makedirs(directory, exist_ok=True)
     except Exception as e:
-        print(f"Couldn't create directory: {e}")
+        pass
         
     try:
         response = requests.get(link, stream=True) 
@@ -149,11 +119,9 @@ def wods_repeated_twice(titles):
         return frequent_words
     return {}
 
-# 3. Worker function for multithreading
-def execute_test_session(env_cap):
-    driver = setup_driver(env_cap)
+if __name__ == "__main__":
+    driver = setup_driver()
     try:
-        print(f"--- Starting session on {env_cap.get('browserName')} - {env_cap.get('os', env_cap.get('deviceName'))} ---")
         extracted_data = scrape_elpais_opinion(driver)
         titles = []
         for i, item in enumerate(extracted_data, 1):
@@ -164,19 +132,20 @@ def execute_test_session(env_cap):
             
             if title_en:
                 titles.append(title_en)
-
+                
         word_count = wods_repeated_twice(titles)
-        print(f"\n[{env_cap.get('browserName')} - {env_cap.get('os', env_cap.get('deviceName'))}] Repeated Words With Count:")
+        print('\nRepeated Words With Count')
         if word_count:
             for word, count in word_count.items():
                 print(f"Word: {word:<10} | Count: {count:>10}")
         else:
             print("None")
 
+        # Evaluate execution and explicitly mark the session as Passed/Failed on BrowserStack
+        if len(titles) > 0:
+            driver.execute_script('browserstack_executor: {"action": "setSessionStatus", "arguments": {"status":"passed", "reason": "Data extracted and translated successfully"}}')
+        else:
+            driver.execute_script('browserstack_executor: {"action": "setSessionStatus", "arguments": {"status":"failed", "reason": "Failed to extract required data"}}')
+
     finally:
         driver.quit()
-
-if __name__ == "__main__":
-    # 4. Execute concurrently using 5 threads
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        executor.map(execute_test_session, environments)
