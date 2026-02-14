@@ -8,15 +8,47 @@ import os
 from dotenv import load_dotenv
 import re
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 
 api_key = os.environ.get("RAPID_API_KEY")
+bs_user = os.environ.get("BROWSERSTACK_USERNAME")
+bs_key = os.environ.get("BROWSERSTACK_ACCESS_KEY")
 
-def setup_driver():
-    options = webdriver.ChromeOptions()
-    driver = webdriver.Chrome(options=options)
-    return driver
+# 1. Define the 5 parallel environments (Desktop & Mobile)
+environments = [
+    {"browserName": "Chrome", "browserVersion": "latest", "os": "Windows", "osVersion": "11"},
+    {"browserName": "Safari", "browserVersion": "latest", "os": "OS X", "osVersion": "Ventura"},
+    {"browserName": "Firefox", "browserVersion": "latest", "os": "Windows", "osVersion": "10"},
+    {"browserName": "chrome", "deviceName": "Samsung Galaxy S23", "osVersion": "13.0"},
+    {"browserName": "safari", "deviceName": "iPhone 14 Pro", "osVersion": "16"}
+]
+
+# 2. Refactored to connect to BrowserStack Hub
+def setup_driver(env_cap):
+    bstack_options = {
+        "os": env_cap.get("os", ""),
+        "osVersion": env_cap.get("osVersion", ""),
+        "deviceName": env_cap.get("deviceName", ""),
+        "realMobile": "true" if "deviceName" in env_cap else "false",
+        "sessionName": f"El Pais Script - {env_cap.get('browserName')} {env_cap.get('os', env_cap.get('deviceName'))}",
+        "userName": bs_user,
+        "accessKey": bs_key
+    }
+    
+    browser_name = env_cap.get("browserName", "chrome").lower()
+    if browser_name == "safari":
+        options = webdriver.safari.options.Options()
+    elif browser_name == "firefox":
+        options = webdriver.firefox.options.Options()
+    else:
+        options = webdriver.ChromeOptions()
+        
+    options.set_capability('bstack:options', bstack_options)
+    
+    hub_url = "https://hub-cloud.browserstack.com/wd/hub"
+    return webdriver.Remote(command_executor=hub_url, options=options)
 
 def scrape_elpais_opinion(driver):
     url = "https://elpais.com/opinion/"
@@ -117,31 +149,24 @@ def wods_repeated_twice(titles):
         return frequent_words
     return {}
 
-if __name__ == "__main__":
-    driver = setup_driver()
+# 3. Worker function for multithreading
+def execute_test_session(env_cap):
+    driver = setup_driver(env_cap)
     try:
+        print(f"--- Starting session on {env_cap.get('browserName')} - {env_cap.get('os', env_cap.get('deviceName'))} ---")
         extracted_data = scrape_elpais_opinion(driver)
         titles = []
         for i, item in enumerate(extracted_data, 1):
-            print(f"Article {i}:")
-            print(f"Title: {item['title']}")
-            print(f"Content: {item['content']}")
-            print(f"Link: {item['link']}")
-            print(f"Image URL: {item['image_url']}")
             save_image(item["image_url"])
             
             english = translate_espanyol_to_eng(item['title'], item['content'])
-            title_en = english['title']
-            content_en = english['content']
-
-            titles.append(title_en)
+            title_en = english.get('title', '')
             
-            print("\nTranslated English verion:")
-            print(f"Title: {title_en}")
-            print(f"Content: {content_en}")
+            if title_en:
+                titles.append(title_en)
 
         word_count = wods_repeated_twice(titles)
-        print('\nRepeated Words With Count')
+        print(f"\n[{env_cap.get('browserName')} - {env_cap.get('os', env_cap.get('deviceName'))}] Repeated Words With Count:")
         if word_count:
             for word, count in word_count.items():
                 print(f"Word: {word:<10} | Count: {count:>10}")
@@ -150,3 +175,8 @@ if __name__ == "__main__":
 
     finally:
         driver.quit()
+
+if __name__ == "__main__":
+    # 4. Execute concurrently using 5 threads
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(execute_test_session, environments)

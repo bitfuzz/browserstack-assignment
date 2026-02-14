@@ -1,1 +1,12 @@
+# Virtual Environments
+venv/
+
+# Environment Variables
 .env
+
+# Logs
+log/
+*.log
+
+# Local media/uploads (Assuming this is runtime generated)
+cover_image/
