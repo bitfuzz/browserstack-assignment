@@ -15,7 +15,7 @@ load_dotenv()
 api_key = os.environ.get("RAPID_API_KEY")
 
 def setup_driver():
-    # Keep it local; the BrowserStack SDK intercepts this automatically
+    # keeping it local,  browserStack SDK intercepts this automatically
     options = webdriver.ChromeOptions()
     driver = webdriver.Chrome(options=options)
     return driver
@@ -25,6 +25,7 @@ def scrape_elpais_opinion(driver):
     driver.get(url)
 
     try:
+        #cookie popup 
         accept_button = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.ID, "didomi-notice-agree-button"))
         )
@@ -141,7 +142,7 @@ if __name__ == "__main__":
         else:
             print("None")
 
-        # Evaluate execution and explicitly mark the session as Passed/Failed on BrowserStack
+        # eval execution and explicitly mark the session as Passed/Failed 
         if len(titles) > 0:
             driver.execute_script('browserstack_executor: {"action": "setSessionStatus", "arguments": {"status":"passed", "reason": "Data extracted and translated successfully"}}')
         else:
